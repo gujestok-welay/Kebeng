@@ -81,6 +81,7 @@ const categoryVisuals = {
 
 export default function ReportsScreen() {
   const [transactions, setTransactions] = useState<SavedTransaction[]>([]);
+  const [period, setPeriod] = useState<'weekly' | 'monthly'>('weekly');
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -105,7 +106,7 @@ export default function ReportsScreen() {
     }, [loadTransactions]),
   );
 
-  const report = useMemo(() => buildWeeklyReport(transactions), [transactions]);
+  const report = useMemo(() => buildReport(transactions, period), [transactions, period]);
 
   return (
     <ScreenShell>
@@ -119,12 +120,16 @@ export default function ReportsScreen() {
         </View>
 
         <View style={styles.tabs}>
-          <View style={styles.activeTab}>
-            <Text style={styles.activeTabText}>Mingguan</Text>
-          </View>
-          <View style={styles.inactiveTab}>
-            <Text style={styles.inactiveTabText}>Bulanan</Text>
-          </View>
+          <Pressable
+            onPress={() => setPeriod('weekly')}
+            style={period === 'weekly' ? styles.activeTab : styles.inactiveTab}>
+            <Text style={period === 'weekly' ? styles.activeTabText : styles.inactiveTabText}>Mingguan</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setPeriod('monthly')}
+            style={period === 'monthly' ? styles.activeTab : styles.inactiveTab}>
+            <Text style={period === 'monthly' ? styles.activeTabText : styles.inactiveTabText}>Bulanan</Text>
+          </Pressable>
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -151,7 +156,7 @@ export default function ReportsScreen() {
           {!isLoading && !errorMessage ? (
             <>
               <Card style={styles.totalCard}>
-                <Text style={textStyles.muted}>Total Pengeluaran 7 Hari Terakhir</Text>
+                <Text style={textStyles.muted}>{report.totalLabel}</Text>
                 <Text style={styles.totalAmount}>{formatRupiah(report.currentWeekExpense)}</Text>
                 <View style={styles.trendRow}>
                   {report.trendPercent > 0 ? (
@@ -160,7 +165,7 @@ export default function ReportsScreen() {
                     <IconTrendingDown size={15} color={Palette.accent} strokeWidth={1.9} />
                   )}
                   <Text style={report.trendPercent > 0 ? styles.trendTextUp : styles.trendTextDown}>
-                    {getTrendText(report.trendPercent)}
+                    {getTrendText(report.trendPercent, period)}
                   </Text>
                 </View>
               </Card>
@@ -212,11 +217,12 @@ export default function ReportsScreen() {
   );
 }
 
-function buildWeeklyReport(transactions: SavedTransaction[]) {
+function buildReport(transactions: SavedTransaction[], period: 'weekly' | 'monthly') {
   const today = startOfDay(new Date());
-  const currentWeekStart = addDays(today, -6);
-  const previousWeekStart = addDays(today, -13);
-  const previousWeekEnd = addDays(today, -7);
+  const days = period === 'weekly' ? 7 : 30;
+  const currentWeekStart = addDays(today, -(days - 1));
+  const previousWeekStart = addDays(today, -((days * 2) - 1));
+  const previousWeekEnd = addDays(today, -days);
 
   const currentWeekExpenses = transactions.filter((transaction) =>
     isExpenseBetween(transaction, currentWeekStart, today),
@@ -229,10 +235,11 @@ function buildWeeklyReport(transactions: SavedTransaction[]) {
   const categoryReports = buildCategoryReports(currentWeekExpenses, currentWeekExpense);
 
   return {
-    aiSummary: buildAiSummary(categoryReports, currentWeekExpense, trendPercent),
+    aiSummary: buildAiSummary(categoryReports, currentWeekExpense, trendPercent, period),
     categoryReports,
     currentWeekExpense,
     monthLabel: today.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }),
+    totalLabel: period === 'weekly' ? 'Total Pengeluaran 7 Hari Terakhir' : 'Total Pengeluaran 30 Hari Terakhir',
     trendPercent,
   };
 }
@@ -253,19 +260,27 @@ function buildCategoryReports(transactions: SavedTransaction[], totalExpense: nu
     .sort((a, b) => b.amount - a.amount);
 }
 
-function buildAiSummary(categoryReports: CategoryReport[], totalExpense: number, trendPercent: number) {
+function buildAiSummary(
+  categoryReports: CategoryReport[],
+  totalExpense: number,
+  trendPercent: number,
+  period: 'weekly' | 'monthly',
+) {
+  const periodLabel = period === 'weekly' ? 'minggu ini' : '30 hari terakhir';
+  const previousLabel = period === 'weekly' ? '7 hari sebelumnya' : '30 hari sebelumnya';
+
   if (totalExpense === 0) {
-    return 'Belum ada pengeluaran tersimpan untuk 7 hari terakhir. Setelah kamu menyimpan transaksi, ringkasan pola pengeluaran akan muncul di sini.';
+    return `Belum ada pengeluaran tersimpan untuk ${periodLabel}. Setelah kamu menyimpan transaksi, ringkasan pola pengeluaran akan muncul di sini.`;
   }
 
   const biggestCategory = categoryReports[0];
   const trendText = trendPercent > 0
-    ? `naik ${trendPercent}% dibanding 7 hari sebelumnya`
+    ? `naik ${trendPercent}% dibanding ${previousLabel}`
     : trendPercent < 0
-      ? `turun ${Math.abs(trendPercent)}% dibanding 7 hari sebelumnya`
-      : 'stabil dibanding 7 hari sebelumnya';
+      ? `turun ${Math.abs(trendPercent)}% dibanding ${previousLabel}`
+      : `stabil dibanding ${previousLabel}`;
 
-  return `Pengeluaran minggu ini ${formatRupiah(totalExpense)} dan ${trendText}. Kategori terbesar adalah ${biggestCategory.category} sebesar ${formatRupiah(biggestCategory.amount)}.`;
+  return `Pengeluaran ${periodLabel} ${formatRupiah(totalExpense)} dan ${trendText}. Kategori terbesar adalah ${biggestCategory.category} sebesar ${formatRupiah(biggestCategory.amount)}.`;
 }
 
 function getTrendPercent(current: number, previous: number) {
@@ -276,16 +291,18 @@ function getTrendPercent(current: number, previous: number) {
   return Math.round(((current - previous) / previous) * 100);
 }
 
-function getTrendText(trendPercent: number) {
+function getTrendText(trendPercent: number, period: 'weekly' | 'monthly') {
+  const previousLabel = period === 'weekly' ? '7 hari sebelumnya' : '30 hari sebelumnya';
+
   if (trendPercent > 0) {
-    return `Naik ${trendPercent}% dari 7 hari sebelumnya`;
+    return `Naik ${trendPercent}% dari ${previousLabel}`;
   }
 
   if (trendPercent < 0) {
-    return `Turun ${Math.abs(trendPercent)}% dari 7 hari sebelumnya`;
+    return `Turun ${Math.abs(trendPercent)}% dari ${previousLabel}`;
   }
 
-  return 'Stabil dari 7 hari sebelumnya';
+  return `Stabil dari ${previousLabel}`;
 }
 
 function sumExpenses(transactions: SavedTransaction[]) {

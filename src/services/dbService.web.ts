@@ -53,11 +53,69 @@ export async function saveParsedTransaction(transaction: ParsedTransaction, sour
   }
 }
 
+export async function updateTransaction(
+  id: number,
+  transaction: ParsedTransaction,
+  source?: TransactionSource,
+) {
+  try {
+    if (!id || !transaction.type || !transaction.amount || !transaction.date) {
+      throw new Error('Data transaksi belum lengkap.');
+    }
+
+    const type = transaction.type;
+    const amount = transaction.amount;
+    const date = transaction.date;
+    const transactions = readTransactions();
+    const nextTransactions = transactions.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            type,
+            amount,
+            category_name: transaction.category,
+            description: transaction.description,
+            source: source ?? item.source,
+            date,
+          }
+        : item,
+    );
+
+    writeTransactions(nextTransactions);
+  } catch (error) {
+    throw toDatabaseError(error, 'Transaksi belum bisa diperbarui.');
+  }
+}
+
+export async function deleteTransaction(id: number) {
+  try {
+    writeTransactions(readTransactions().filter((transaction) => transaction.id !== id));
+  } catch (error) {
+    throw toDatabaseError(error, 'Transaksi belum bisa dihapus.');
+  }
+}
+
 export async function getRecentTransactions(limit = 10) {
   try {
     return readTransactions().slice(0, limit);
   } catch (error) {
     throw toDatabaseError(error, 'Transaksi belum bisa dibaca.');
+  }
+}
+
+export async function clearLocalData() {
+  try {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.removeItem(STORAGE_KEY);
+
+    Object.keys(window.localStorage)
+      .filter((key) => key.startsWith('kebeng_setting_'))
+      .forEach((key) => window.localStorage.removeItem(key));
+  } catch (error) {
+    throw toDatabaseError(error, 'Data lokal belum bisa dihapus.');
   }
 }
 

@@ -107,6 +107,49 @@ export async function saveParsedTransaction(transaction: ParsedTransaction, sour
   }
 }
 
+export async function updateTransaction(
+  id: number,
+  transaction: ParsedTransaction,
+  source?: TransactionSource,
+) {
+  try {
+    if (!id || !transaction.type || !transaction.amount || !transaction.date) {
+      throw new Error('Data transaksi belum lengkap.');
+    }
+
+    const db = await initDatabase();
+    const categoryId = transaction.category
+      ? await findOrCreateCategory(db, transaction.category, transaction.type)
+      : null;
+
+    await db.runAsync(
+      `
+      UPDATE transactions
+      SET type = ?, amount = ?, category_id = ?, description = ?, source = COALESCE(?, source), date = ?
+      WHERE id = ?
+      `,
+      transaction.type,
+      transaction.amount,
+      categoryId,
+      transaction.description ?? null,
+      source ?? null,
+      transaction.date,
+      id,
+    );
+  } catch (error) {
+    throw toDatabaseError(error, 'Transaksi belum bisa diperbarui.');
+  }
+}
+
+export async function deleteTransaction(id: number) {
+  try {
+    const db = await initDatabase();
+    await db.runAsync('DELETE FROM transactions WHERE id = ?', id);
+  } catch (error) {
+    throw toDatabaseError(error, 'Transaksi belum bisa dihapus.');
+  }
+}
+
 export async function getRecentTransactions(limit = 10) {
   try {
     const db = await initDatabase();
@@ -125,6 +168,24 @@ export async function getRecentTransactions(limit = 10) {
     );
   } catch (error) {
     throw toDatabaseError(error, 'Transaksi belum bisa dibaca.');
+  }
+}
+
+export async function clearLocalData() {
+  try {
+    const db = await initDatabase();
+
+    await db.execAsync(`
+      DELETE FROM transactions;
+      DELETE FROM budgets;
+      DELETE FROM notifications_log;
+      DELETE FROM settings;
+      DELETE FROM categories WHERE is_default = 0;
+    `);
+
+    await seedDefaultCategories(db);
+  } catch (error) {
+    throw toDatabaseError(error, 'Data lokal belum bisa dihapus.');
   }
 }
 

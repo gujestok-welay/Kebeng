@@ -1,24 +1,65 @@
 import {
-  IconBellExclamation,
-  IconBellRinging,
-  IconCalendarMonth,
+  IconBrain,
   IconChevronRight,
-  IconClock,
-  IconDownload,
-  IconFileSpreadsheet,
-  IconTag,
+  IconDatabase,
+  IconGauge,
+  IconKey,
+  IconRefresh,
   IconTrash,
   IconWallet,
 } from '@tabler/icons-react-native';
-import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import Constants from 'expo-constants';
+import React, { useCallback, useState } from 'react';
+import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Card, IconCircle, ScreenShell, SectionLabel, ToggleSwitch, textStyles } from '@/components/kebeng-ui';
+import { Card, IconCircle, ScreenShell, SectionLabel, textStyles } from '@/components/kebeng-ui';
 import { Palette } from '@/constants/theme';
-import { formatRupiah } from '@/utils/format';
+import { AI_USAGE_LIMITS, AiUsage, getAiUsage } from '@/services/aiUsageService';
+import { clearLocalData } from '@/services/dbService';
+
+const provider = process.env.EXPO_PUBLIC_AI_PROVIDER || 'openrouter';
+const openRouterKey = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY;
+const textModel = process.env.EXPO_PUBLIC_OPENROUTER_TEXT_MODEL || 'Belum diset';
+const visionModel = process.env.EXPO_PUBLIC_OPENROUTER_VISION_MODEL || 'Belum diset';
 
 export default function SettingsScreen() {
+  const [usage, setUsage] = useState<AiUsage | null>(null);
+
+  const loadUsage = useCallback(async () => {
+    setUsage(await getAiUsage());
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadUsage();
+    }, [loadUsage]),
+  );
+
+  function confirmResetData() {
+    Alert.alert(
+      'Reset data lokal?',
+      'Semua transaksi, budget, log notifikasi, dan pemakaian AI harian akan dihapus dari perangkat ini.',
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await clearLocalData();
+              await loadUsage();
+              Alert.alert('Berhasil', 'Data lokal sudah direset.');
+            } catch (error) {
+              Alert.alert('Gagal reset', error instanceof Error ? error.message : 'Coba lagi sebentar.');
+            }
+          },
+        },
+      ],
+    );
+  }
+
   return (
     <ScreenShell>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
@@ -32,32 +73,43 @@ export default function SettingsScreen() {
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View>
-            <SectionLabel>Budget</SectionLabel>
-            <Card style={styles.listCard}>
-              <SettingRow icon={IconCalendarMonth} title="Budget Bulanan Total" value={formatRupiah(1500000)} />
-              <SettingRow icon={IconTag} title="Budget Per Kategori" value="5 kategori" />
-              <SettingRow icon={IconBellExclamation} title="Peringatan Budget" trailing={<ToggleSwitch active />} />
-            </Card>
-          </View>
-
-          <View>
-            <SectionLabel>Notifikasi</SectionLabel>
-            <Card style={styles.listCard}>
-              <SettingRow icon={IconClock} title="Ringkasan Harian" value="Setiap 21:00" trailing={<ToggleSwitch active />} />
-              <SettingRow icon={IconBellRinging} title="Pengingat Input" value="Jika belum input seharian" trailing={<ToggleSwitch active={false} />} />
-            </Card>
-          </View>
-
-          <View>
-            <SectionLabel>Data</SectionLabel>
+            <SectionLabel>AI</SectionLabel>
             <Card style={styles.listCard}>
               <SettingRow
-                icon={IconFileSpreadsheet}
-                title="Export Excel"
-                value="Transaksi dan laporan"
-                trailing={<IconDownload size={18} color={Palette.accent} strokeWidth={1.9} />}
+                icon={IconBrain}
+                title="Provider AI"
+                value={`${providerLabel(provider)} - ${openRouterKey ? 'aktif' : 'API key belum ada'}`}
               />
-              <SettingRow icon={IconTrash} title="Hapus Semua Data" danger trailing={<IconChevronRight size={18} color={Palette.expense} strokeWidth={1.9} />} />
+              <SettingRow icon={IconKey} title="Model chat" value={textModel} />
+              <SettingRow icon={IconKey} title="Model struk" value={visionModel} />
+              <SettingRow
+                icon={IconGauge}
+                title="Batas AI hari ini"
+                value={`Chat ${usage?.chatCount ?? 0}/${AI_USAGE_LIMITS.chatDaily}, Struk ${usage?.receiptCount ?? 0}/${AI_USAGE_LIMITS.receiptDaily}`}
+              />
+            </Card>
+          </View>
+
+          <View>
+            <SectionLabel>Penyimpanan</SectionLabel>
+            <Card style={styles.listCard}>
+              <SettingRow
+                icon={IconDatabase}
+                title="Data lokal"
+                value={Platform.OS === 'web' ? 'LocalStorage browser untuk mode web' : 'SQLite lokal di perangkat'}
+              />
+              <SettingRow
+                icon={IconRefresh}
+                title="Build aplikasi"
+                value={`${Constants.expoConfig?.version ?? 'dev'} - ${Platform.OS}`}
+              />
+              <SettingRow
+                danger
+                icon={IconTrash}
+                title="Reset data lokal"
+                value="Hapus semua data di perangkat ini"
+                onPress={confirmResetData}
+              />
             </Card>
           </View>
         </ScrollView>
@@ -67,20 +119,20 @@ export default function SettingsScreen() {
 }
 
 function SettingRow({
+  danger,
   icon,
+  onPress,
   title,
   value,
-  trailing,
-  danger,
 }: {
+  danger?: boolean;
   icon: Parameters<typeof IconCircle>[0]['icon'];
+  onPress?: () => void;
   title: string;
   value?: string;
-  trailing?: React.ReactNode;
-  danger?: boolean;
 }) {
-  return (
-    <View style={styles.row}>
+  const content = (
+    <>
       <IconCircle
         icon={icon}
         color={danger ? Palette.expense : Palette.accent}
@@ -91,9 +143,35 @@ function SettingRow({
         <Text style={[textStyles.title, danger && styles.dangerText]}>{title}</Text>
         {value ? <Text style={textStyles.tiny}>{value}</Text> : null}
       </View>
-      {trailing ?? <IconChevronRight size={18} color={Palette.textTertiary} strokeWidth={1.9} />}
-    </View>
+      <IconChevronRight
+        size={18}
+        color={danger ? Palette.expense : onPress ? Palette.textTertiary : Palette.border}
+        strokeWidth={1.9}
+      />
+    </>
   );
+
+  if (onPress) {
+    return (
+      <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+        {content}
+      </Pressable>
+    );
+  }
+
+  return <View style={styles.row}>{content}</View>;
+}
+
+function providerLabel(value: string) {
+  if (value.toLowerCase() === 'openrouter') {
+    return 'OpenRouter';
+  }
+
+  if (value.toLowerCase() === 'gemini') {
+    return 'Gemini';
+  }
+
+  return value;
 }
 
 const styles = StyleSheet.create({
@@ -136,7 +214,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     gap: 12,
-    minHeight: 58,
+    minHeight: 62,
   },
   rowText: {
     flex: 1,
@@ -144,5 +222,8 @@ const styles = StyleSheet.create({
   },
   dangerText: {
     color: Palette.expense,
+  },
+  pressed: {
+    opacity: 0.72,
   },
 });

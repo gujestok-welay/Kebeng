@@ -1,19 +1,42 @@
-import { IconArrowDownCircle, IconArrowUpCircle, IconBell, IconWallet } from '@tabler/icons-react-native';
-import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { IconArrowDownCircle, IconArrowUpCircle, IconBell, IconReceipt, IconWallet } from '@tabler/icons-react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Card, HeaderIcon, IconCircle, ProgressBar, ScreenShell, SectionLabel, textStyles } from '@/components/kebeng-ui';
 import { Palette } from '@/constants/theme';
-import { categoryMeta, transactions } from '@/data/mock-finance';
+import { getRecentTransactions, initDatabase, SavedTransaction } from '@/services/dbService';
 import { formatRupiah, formatSignedRupiah } from '@/utils/format';
 
-const monthlyBudget = 1500000;
-const usedBudget = 965000;
-const budgetLeft = monthlyBudget - usedBudget;
-const budgetPercent = Math.round((usedBudget / monthlyBudget) * 100);
-
 export default function HomeScreen() {
+  const [transactions, setTransactions] = useState<SavedTransaction[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const loadDashboard = useCallback(async () => {
+    setIsLoading(true);
+
+    try {
+      await initDatabase();
+      const rows = await getRecentTransactions(500);
+      setTransactions(rows);
+      setErrorMessage(null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Ringkasan belum bisa dibaca.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboard();
+    }, [loadDashboard]),
+  );
+
+  const dashboard = useMemo(() => buildDashboard(transactions), [transactions]);
+
   return (
     <ScreenShell>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
@@ -29,12 +52,14 @@ export default function HomeScreen() {
           </View>
 
           <Card accent style={styles.budgetCard}>
-            <Text style={styles.budgetLabel}>Sisa Budget Bulan Ini</Text>
-            <Text style={styles.budgetAmount}>{formatRupiah(budgetLeft)}</Text>
-            <ProgressBar value={budgetPercent} warning={budgetPercent > 80} />
+            <Text style={styles.budgetLabel}>Arus Kas Bulan Ini</Text>
+            <Text style={dashboard.netBalance >= 0 ? styles.budgetAmount : styles.budgetAmountWarning}>
+              {formatRupiah(Math.abs(dashboard.netBalance))}
+            </Text>
+            <ProgressBar value={dashboard.expensePercent} warning={dashboard.expensePercent > 80} />
             <View style={styles.budgetFooter}>
-              <Text style={textStyles.muted}>Terpakai {formatRupiah(usedBudget)}</Text>
-              <Text style={styles.budgetPercent}>{budgetPercent}%</Text>
+              <Text style={textStyles.muted}>Pengeluaran {formatRupiah(dashboard.monthlyExpense)}</Text>
+              <Text style={styles.budgetPercent}>{dashboard.expensePercent}% dari pemasukan</Text>
             </View>
           </Card>
 
@@ -42,39 +67,98 @@ export default function HomeScreen() {
             <Card style={styles.statCard}>
               <IconArrowDownCircle size={20} color={Palette.accent} strokeWidth={1.8} />
               <Text style={textStyles.muted}>Pemasukan</Text>
-              <Text style={styles.incomeText}>{formatRupiah(2750000)}</Text>
+              <Text style={styles.incomeText}>{formatRupiah(dashboard.monthlyIncome)}</Text>
             </Card>
             <Card style={styles.statCard}>
               <IconArrowUpCircle size={20} color={Palette.expense} strokeWidth={1.8} />
               <Text style={textStyles.muted}>Pengeluaran</Text>
-              <Text style={styles.expenseText}>{formatRupiah(965000)}</Text>
+              <Text style={styles.expenseText}>{formatRupiah(dashboard.monthlyExpense)}</Text>
             </Card>
           </View>
 
           <View>
             <SectionLabel>Transaksi Terbaru</SectionLabel>
             <Card style={styles.listCard}>
-              {transactions.slice(0, 3).map((item, index) => {
-                const meta = categoryMeta[item.category];
-                return (
-                  <View key={item.id} style={[styles.transactionRow, index > 0 && styles.rowBorder]}>
-                    <IconCircle icon={meta.icon} color={meta.color} background={meta.background} />
-                    <View style={styles.rowText}>
-                      <Text style={textStyles.title}>{item.title}</Text>
-                      <Text style={textStyles.tiny}>{item.time}</Text>
-                    </View>
-                    <Text style={item.type === 'income' ? styles.incomeText : styles.expenseText}>
-                      {formatSignedRupiah(item.amount, item.type)}
-                    </Text>
-                  </View>
-                );
-              })}
+              {isLoading ? (
+                <View style={styles.stateRow}>
+                  <ActivityIndicator color={Palette.accent} />
+                  <Text style={textStyles.muted}>Memuat data lokal...</Text>
+                </View>
+              ) : null}
+
+              {!isLoading && errorMessage ? (
+                <Text style={styles.stateText}>{errorMessage}</Text>
+              ) : null}
+
+              {!isLoading && !errorMessage && dashboard.recentTransactions.length === 0 ? (
+                <View style={styles.stateRow}>
+                  <IconReceipt size={20} color={Palette.textTertiary} strokeWidth={1.8} />
+                  <Text style={textStyles.muted}>Belum ada transaksi tersimpan.</Text>
+                </View>
+              ) : null}
+
+              {!isLoading && !errorMessage
+                ? dashboard.recentTransactions.map((item, index) => {
+                    const isIncome = item.type === 'income';
+                    return (
+                      <View key={item.id} style={[styles.transactionRow, index > 0 && styles.rowBorder]}>
+                        <IconCircle
+                          icon={IconReceipt}
+                          color={isIncome ? Palette.accent : Palette.expense}
+                          background={isIncome ? Palette.accentDark : Palette.expenseBg}
+                        />
+                        <View style={styles.rowText}>
+                          <Text style={textStyles.title}>
+                            {item.description || item.category_name || 'Transaksi'}
+                          </Text>
+                          <Text style={textStyles.tiny}>
+                            {(item.category_name ?? 'Lainnya')} - {formatDisplayDate(item.date)}
+                          </Text>
+                        </View>
+                        <Text style={isIncome ? styles.incomeText : styles.expenseText}>
+                          {formatSignedRupiah(item.amount, item.type)}
+                        </Text>
+                      </View>
+                    );
+                  })
+                : null}
             </Card>
           </View>
         </ScrollView>
       </SafeAreaView>
     </ScreenShell>
   );
+}
+
+function buildDashboard(transactions: SavedTransaction[]) {
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}`;
+  const monthlyTransactions = transactions.filter((transaction) => transaction.date.startsWith(monthKey));
+  const monthlyIncome = monthlyTransactions
+    .filter((transaction) => transaction.type === 'income')
+    .reduce((total, transaction) => total + transaction.amount, 0);
+  const monthlyExpense = monthlyTransactions
+    .filter((transaction) => transaction.type === 'expense')
+    .reduce((total, transaction) => total + transaction.amount, 0);
+  const expensePercent = monthlyIncome > 0 ? Math.round((monthlyExpense / monthlyIncome) * 100) : 0;
+
+  return {
+    expensePercent,
+    monthlyExpense,
+    monthlyIncome,
+    netBalance: monthlyIncome - monthlyExpense,
+    recentTransactions: transactions.slice(0, 3),
+  };
+}
+
+function formatDisplayDate(value: string) {
+  const [year, month, day] = value.split('-');
+
+  if (!year || !month || !day) {
+    return value;
+  }
+
+  return `${day}/${month}/${year}`;
 }
 
 const styles = StyleSheet.create({
@@ -123,6 +207,11 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '500',
   },
+  budgetAmountWarning: {
+    color: Palette.expense,
+    fontSize: 28,
+    fontWeight: '500',
+  },
   budgetFooter: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -167,5 +256,18 @@ const styles = StyleSheet.create({
     color: Palette.expense,
     fontSize: 15,
     fontWeight: '500',
+  },
+  stateRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 58,
+  },
+  stateText: {
+    color: Palette.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    paddingVertical: 16,
+    textAlign: 'center',
   },
 });

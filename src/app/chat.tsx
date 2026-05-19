@@ -77,7 +77,7 @@ export default function ChatScreen() {
     inputLength > 0 &&
     inputLength <= AI_USAGE_LIMITS.chatMaxCharacters &&
     !isLoading &&
-    (!aiUsage || canUseAi(aiUsage, 'chat'));
+    (!isOnline || !aiUsage || canUseAi(aiUsage, 'chat'));
   const hasLowConfidence = useMemo(() => (draft?.confidence ?? 1) < 0.7, [draft]);
 
   useEffect(() => {
@@ -296,8 +296,10 @@ export default function ChatScreen() {
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <View style={styles.header}>
           <View>
-            <Text style={textStyles.pageTitle}>Chat AI</Text>
-            <Text style={styles.subtitle}>Cerita pengeluaranmu secara natural</Text>
+            <Text style={textStyles.pageTitle}>{isOnline ? 'Chat AI' : 'Catat transaksi'}</Text>
+            <Text style={styles.subtitle}>
+              {isOnline ? 'Cerita pengeluaranmu secara natural' : 'Mode offline, simpan manual dari teksmu'}
+            </Text>
           </View>
           <HeaderIcon icon={IconHistory} />
         </View>
@@ -325,6 +327,7 @@ export default function ChatScreen() {
               draft={draft}
               lowConfidence={hasLowConfidence}
               saving={isSaving}
+              source={draftSource}
               onChange={setDraft}
               onCancel={() => setDraft(null)}
               onSave={handleSaveDraft}
@@ -343,12 +346,17 @@ export default function ChatScreen() {
             onPress={handlePickReceipt}
             style={({ pressed }) => [
               styles.cameraButton,
+              !isOnline && styles.cameraButtonOffline,
               (isLoading || pressed) && styles.pressed,
             ]}>
             {isLoading ? (
               <ActivityIndicator color={Palette.text} size="small" />
             ) : (
-              <IconCamera size={20} color={Palette.text} strokeWidth={1.8} />
+              <IconCamera
+                size={20}
+                color={isOnline ? Palette.text : Palette.textTertiary}
+                strokeWidth={1.8}
+              />
             )}
           </Pressable>
           <TextInput
@@ -501,6 +509,7 @@ function ConfirmationCard({
   draft,
   lowConfidence,
   saving,
+  source,
   onChange,
   onCancel,
   onSave,
@@ -508,11 +517,13 @@ function ConfirmationCard({
   draft: ParsedTransaction;
   lowConfidence: boolean;
   saving: boolean;
+  source: 'chat' | 'photo' | 'manual';
   onChange: (draft: ParsedTransaction) => void;
   onCancel: () => void;
   onSave: () => void;
 }) {
   const amountText = draft.amount ? String(draft.amount) : '';
+  const sourceLabel = source === 'manual' ? 'Manual' : source === 'photo' ? 'Foto' : 'Chat AI';
 
   function update(field: keyof ParsedTransaction, value: ParsedTransaction[keyof ParsedTransaction]) {
     onChange({ ...draft, [field]: value });
@@ -524,12 +535,15 @@ function ConfirmationCard({
         <View style={styles.confirmTitleWrap}>
           <Text style={textStyles.title}>Konfirmasi transaksi</Text>
           <Text style={styles.confidenceText}>
-            Keyakinan AI {Math.round(draft.confidence * 100)}%
+            {source === 'manual' ? 'Draft manual dari input offline' : `Keyakinan AI ${Math.round(draft.confidence * 100)}%`}
           </Text>
         </View>
-        <Badge tone={draft.type === 'income' ? 'green' : 'red'}>
-          {draft.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}
-        </Badge>
+        <View style={styles.confirmBadges}>
+          <Badge tone="gray">{sourceLabel}</Badge>
+          <Badge tone={draft.type === 'income' ? 'green' : 'red'}>
+            {draft.type === 'income' ? 'Pemasukan' : 'Pengeluaran'}
+          </Badge>
+        </View>
       </View>
 
       {lowConfidence ? (
@@ -808,6 +822,10 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 5,
   },
+  confirmBadges: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
   confidenceText: {
     color: Palette.textTertiary,
     fontSize: 11,
@@ -925,6 +943,10 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: 'center',
     width: 40,
+  },
+  cameraButtonOffline: {
+    borderColor: Palette.orangeBg,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   input: {
     backgroundColor: Palette.card,
