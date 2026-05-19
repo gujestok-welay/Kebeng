@@ -7,20 +7,45 @@ import '@/global.css';
 
 import { Platform } from 'react-native';
 
+export const Palette = {
+  background: '#111111',
+  card: '#1c1c1c',
+  cardAccent: '#0d1f16',
+  border: '#2a2a2a',
+  accent: '#2DD4A0',
+  accentDark: '#0d3d2a',
+  accentBorder: '#1e3d2a',
+  text: '#f0f0f0',
+  textNormal: '#cccccc',
+  textSecondary: '#888888',
+  textTertiary: '#555555',
+  expense: '#f87171',
+  expenseBg: '#3d1515',
+  blue: '#60aaee',
+  blueBg: '#0d2233',
+  orange: '#f0a040',
+  orangeBg: '#2a1a0d',
+  purple: '#a078f0',
+  purpleBg: '#1e0d33',
+  coffee: '#d4894a',
+  coffeeBg: '#1e1208',
+  grayBg: '#222222',
+} as const;
+
 export const Colors = {
   light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+    text: Palette.text,
+    background: Palette.background,
+    backgroundElement: Palette.card,
+    backgroundSelected: Palette.accentDark,
+    textSecondary: Palette.textSecondary,
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    text: Palette.text,
+    background: Palette.background,
+    backgroundElement: Palette.card,
+    backgroundSelected: Palette.accentDark,
+    textSecondary: Palette.textSecondary,
   },
 } as const;
 

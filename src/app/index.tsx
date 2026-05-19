@@ -1,98 +1,171 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+import { IconArrowDownCircle, IconArrowUpCircle, IconBell, IconWallet } from '@tabler/icons-react-native';
+import React from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { Card, HeaderIcon, IconCircle, ProgressBar, ScreenShell, SectionLabel, textStyles } from '@/components/kebeng-ui';
+import { Palette } from '@/constants/theme';
+import { categoryMeta, transactions } from '@/data/mock-finance';
+import { formatRupiah, formatSignedRupiah } from '@/utils/format';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+const monthlyBudget = 1500000;
+const usedBudget = 965000;
+const budgetLeft = monthlyBudget - usedBudget;
+const budgetPercent = Math.round((usedBudget / monthlyBudget) * 100);
 
 export default function HomeScreen() {
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
+    <ScreenShell>
+      <SafeAreaView edges={['top']} style={styles.safeArea}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.header}>
+            <View style={styles.brand}>
+              <View style={styles.logo}>
+                <IconWallet size={20} color={Palette.accent} strokeWidth={1.9} />
+              </View>
+              <Text style={styles.brandText}>Kebeng</Text>
+            </View>
+            <HeaderIcon icon={IconBell} />
+          </View>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+          <Card accent style={styles.budgetCard}>
+            <Text style={styles.budgetLabel}>Sisa Budget Bulan Ini</Text>
+            <Text style={styles.budgetAmount}>{formatRupiah(budgetLeft)}</Text>
+            <ProgressBar value={budgetPercent} warning={budgetPercent > 80} />
+            <View style={styles.budgetFooter}>
+              <Text style={textStyles.muted}>Terpakai {formatRupiah(usedBudget)}</Text>
+              <Text style={styles.budgetPercent}>{budgetPercent}%</Text>
+            </View>
+          </Card>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
+          <View style={styles.statsGrid}>
+            <Card style={styles.statCard}>
+              <IconArrowDownCircle size={20} color={Palette.accent} strokeWidth={1.8} />
+              <Text style={textStyles.muted}>Pemasukan</Text>
+              <Text style={styles.incomeText}>{formatRupiah(2750000)}</Text>
+            </Card>
+            <Card style={styles.statCard}>
+              <IconArrowUpCircle size={20} color={Palette.expense} strokeWidth={1.8} />
+              <Text style={textStyles.muted}>Pengeluaran</Text>
+              <Text style={styles.expenseText}>{formatRupiah(965000)}</Text>
+            </Card>
+          </View>
 
-        {Platform.OS === 'web' && <WebBadge />}
+          <View>
+            <SectionLabel>Transaksi Terbaru</SectionLabel>
+            <Card style={styles.listCard}>
+              {transactions.slice(0, 3).map((item, index) => {
+                const meta = categoryMeta[item.category];
+                return (
+                  <View key={item.id} style={[styles.transactionRow, index > 0 && styles.rowBorder]}>
+                    <IconCircle icon={meta.icon} color={meta.color} background={meta.background} />
+                    <View style={styles.rowText}>
+                      <Text style={textStyles.title}>{item.title}</Text>
+                      <Text style={textStyles.tiny}>{item.time}</Text>
+                    </View>
+                    <Text style={item.type === 'income' ? styles.incomeText : styles.expenseText}>
+                      {formatSignedRupiah(item.amount, item.type)}
+                    </Text>
+                  </View>
+                );
+              })}
+            </Card>
+          </View>
+        </ScrollView>
       </SafeAreaView>
-    </ThemedView>
+    </ScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
   safeArea: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
   },
-  heroSection: {
+  content: {
+    paddingTop: 12,
+    paddingBottom: 100,
+    gap: 18,
+  },
+  header: {
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  brand: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  logo: {
+    alignItems: 'center',
+    backgroundColor: Palette.cardAccent,
+    borderColor: Palette.accentBorder,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 36,
     justifyContent: 'center',
+    width: 36,
+  },
+  brandText: {
+    color: Palette.accent,
+    fontSize: 18,
+    fontWeight: '500',
+  },
+  budgetCard: {
+    gap: 13,
+  },
+  budgetLabel: {
+    color: Palette.textSecondary,
+    fontSize: 12,
+  },
+  budgetAmount: {
+    color: Palette.accent,
+    fontSize: 28,
+    fontWeight: '500',
+  },
+  budgetFooter: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  budgetPercent: {
+    color: Palette.accent,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  statCard: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+    gap: 8,
   },
-  title: {
-    textAlign: 'center',
+  listCard: {
+    paddingVertical: 4,
   },
-  code: {
-    textTransform: 'uppercase',
+  transactionRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 58,
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  rowBorder: {
+    borderTopColor: Palette.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  rowText: {
+    flex: 1,
+    gap: 3,
+  },
+  incomeText: {
+    color: Palette.accent,
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  expenseText: {
+    color: Palette.expense,
+    fontSize: 15,
+    fontWeight: '500',
   },
 });
