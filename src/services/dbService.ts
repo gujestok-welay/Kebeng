@@ -14,6 +14,8 @@ export type SavedTransaction = {
   created_at: string;
 };
 
+export type TransactionSource = 'chat' | 'photo' | 'manual';
+
 let databasePromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export async function initDatabase() {
@@ -75,7 +77,7 @@ export async function initDatabase() {
   }
 }
 
-export async function saveParsedTransaction(transaction: ParsedTransaction) {
+export async function saveParsedTransaction(transaction: ParsedTransaction, source: TransactionSource = 'chat') {
   try {
     if (!transaction.type || !transaction.amount || !transaction.date) {
       throw new Error('Data transaksi belum lengkap.');
@@ -89,12 +91,13 @@ export async function saveParsedTransaction(transaction: ParsedTransaction) {
     const result = await db.runAsync(
       `
       INSERT INTO transactions (type, amount, category_id, description, source, date)
-      VALUES (?, ?, ?, ?, 'chat', ?)
+      VALUES (?, ?, ?, ?, ?, ?)
       `,
       transaction.type,
       transaction.amount,
       categoryId,
       transaction.description ?? null,
+      source,
       transaction.date,
     );
 

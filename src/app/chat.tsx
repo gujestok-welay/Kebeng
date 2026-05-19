@@ -7,6 +7,7 @@ import {
   IconSend,
   IconTrash,
 } from '@tabler/icons-react-native';
+import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -26,6 +27,7 @@ import { Badge, Card, HeaderIcon, ScreenShell, textStyles } from '@/components/k
 import { Palette } from '@/constants/theme';
 import { initDatabase, saveParsedTransaction } from '@/services/dbService';
 import {
+  parseTransactionFromReceiptImage,
   parseTransactionFromChat,
   ParsedTransaction,
 } from '@/services/geminiService';
@@ -49,7 +51,9 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState('');
   const [draft, setDraft] = useState<ParsedTransaction | null>(null);
+  const [draftSource, setDraftSource] = useState<'chat' | 'photo'>('chat');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingText, setLoadingText] = useState('Kebeng AI sedang membaca transaksi...');
   const [isSaving, setIsSaving] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -75,12 +79,15 @@ export default function ChatScreen() {
 
     setInput('');
     setDraft(null);
+    setDraftSource('chat');
     setMessages((current) => [...current, { id: `${Date.now()}-user`, role: 'user', text }]);
+    setLoadingText('Kebeng AI sedang membaca transaksi...');
     setIsLoading(true);
 
     try {
       const parsed = await parseTransactionFromChat(text);
       setDraft(parsed);
+      setDraftSource('chat');
 
       setMessages((current) => [
         ...current,
@@ -90,6 +97,73 @@ export default function ChatScreen() {
           text: parsed.confidence < 0.7
             ? 'Aku kurang yakin dengan hasilnya. Cek dan edit dulu sebelum disimpan ya.'
             : 'Aku sudah susun draft transaksinya. Cek sebentar, lalu simpan kalau sudah benar.',
+        },
+      ]);
+    } catch (error) {
+      addSystemMessage(getFriendlyError(error));
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function handlePickReceipt() {
+    if (isLoading) {
+      return;
+    }
+
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert('Izin diperlukan', 'Izinkan akses galeri agar Kebeng bisa membaca foto struk.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        allowsEditing: false,
+        base64: true,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        quality: 0.75,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const asset = result.assets[0];
+
+      if (!asset?.base64) {
+        Alert.alert('Foto belum bisa dibaca', 'Pilih foto lain atau coba ulangi.');
+        return;
+      }
+
+      setDraft(null);
+      setDraftSource('photo');
+      setMessages((current) => [
+        ...current,
+        {
+          id: `${Date.now()}-user-photo`,
+          role: 'user',
+          text: `Mengunggah foto struk: ${asset.fileName || 'struk'}`,
+        },
+      ]);
+      setLoadingText('Kebeng AI sedang membaca foto struk...');
+      setIsLoading(true);
+
+      const parsed = await parseTransactionFromReceiptImage({
+        base64: asset.base64,
+        mimeType: asset.mimeType,
+      });
+
+      setDraft(parsed);
+      setMessages((current) => [
+        ...current,
+        {
+          id: `${Date.now()}-ai-photo`,
+          role: 'ai',
+          text: parsed.confidence < 0.7
+            ? 'Hasil baca struk masih kurang yakin. Cek dan edit dulu sebelum disimpan ya.'
+            : 'Aku sudah baca foto struknya. Cek hasilnya, lalu simpan kalau sudah benar.',
         },
       ]);
     } catch (error) {
@@ -112,7 +186,7 @@ export default function ChatScreen() {
     setIsSaving(true);
 
     try {
-      await saveParsedTransaction(draft);
+      await saveParsedTransaction(draft, draftSource);
       setDraft(null);
       addSystemMessage('Transaksi berhasil disimpan.');
     } catch (error) {
@@ -149,7 +223,7 @@ export default function ChatScreen() {
           {isLoading ? (
             <View style={styles.loadingBubble}>
               <ActivityIndicator color={Palette.accent} />
-              <Text style={styles.loadingText}>Kebeng AI sedang membaca transaksi...</Text>
+              <Text style={styles.loadingText}>{loadingText}</Text>
             </View>
           ) : null}
 
@@ -172,9 +246,17 @@ export default function ChatScreen() {
         style={styles.inputDock}>
         <SafeAreaView edges={['bottom']} style={styles.inputRow}>
           <Pressable
-            onPress={() => Alert.alert('Segera hadir', 'Upload foto struk akan masuk di fase berikutnya.')}
-            style={({ pressed }) => [styles.cameraButton, pressed && styles.pressed]}>
-            <IconCamera size={20} color={Palette.text} strokeWidth={1.8} />
+            disabled={isLoading}
+            onPress={handlePickReceipt}
+            style={({ pressed }) => [
+              styles.cameraButton,
+              (isLoading || pressed) && styles.pressed,
+            ]}>
+            {isLoading ? (
+              <ActivityIndicator color={Palette.text} size="small" />
+            ) : (
+              <IconCamera size={20} color={Palette.text} strokeWidth={1.8} />
+            )}
           </Pressable>
           <TextInput
             editable={!isLoading}

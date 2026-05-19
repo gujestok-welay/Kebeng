@@ -11,11 +11,26 @@ export type ParsedTransaction = {
 
 const GEMINI_MODEL = 'gemini-2.0-flash';
 const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY;
+const AI_PROVIDER = process.env.EXPO_PUBLIC_AI_PROVIDER?.toLowerCase();
+const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY;
+const OPENROUTER_TEXT_MODEL = process.env.EXPO_PUBLIC_OPENROUTER_TEXT_MODEL || 'openrouter/free';
+const OPENROUTER_VISION_MODEL =
+  process.env.EXPO_PUBLIC_OPENROUTER_VISION_MODEL || 'nvidia/nemotron-nano-12b-v2-vl:free';
+const OPENROUTER_FALLBACK_VISION_MODEL = 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 export async function parseTransactionFromChat(input: string): Promise<ParsedTransaction> {
   try {
     if (!input.trim()) {
       throw new Error('Tulis transaksi dulu ya.');
+    }
+
+    if (AI_PROVIDER === 'openrouter') {
+      if (!OPENROUTER_API_KEY) {
+        return parseTransactionLocally(input);
+      }
+
+      return parseTransactionWithOpenRouter(input);
     }
 
     if (!GEMINI_API_KEY) {
@@ -49,7 +64,7 @@ export async function parseTransactionFromChat(input: string): Promise<ParsedTra
     );
 
     if (!response.ok) {
-      throw new Error('Koneksi ke Gemini bermasalah. Coba lagi sebentar.');
+      throw new Error(await getGeminiErrorMessage(response));
     }
 
     const payload = await response.json();
@@ -68,6 +83,262 @@ export async function parseTransactionFromChat(input: string): Promise<ParsedTra
     throw error instanceof Error
       ? error
       : new Error('Transaksi belum bisa diproses. Periksa internet lalu coba lagi.');
+  }
+}
+
+export async function parseTransactionFromReceiptImage({
+  base64,
+  mimeType = 'image/jpeg',
+}: {
+  base64: string;
+  mimeType?: string | null;
+}): Promise<ParsedTransaction> {
+  if (!OPENROUTER_API_KEY) {
+    throw new Error('API key OpenRouter belum tersedia. Cek file .env lalu restart Expo.');
+  }
+
+  const firstResult = await parseReceiptImageWithOpenRouterModel({
+    base64,
+    mimeType,
+    model: OPENROUTER_VISION_MODEL,
+  }).catch((error: unknown) => error);
+
+  if (isParsedTransaction(firstResult)) {
+    return firstResult;
+  }
+
+  if (OPENROUTER_VISION_MODEL === OPENROUTER_FALLBACK_VISION_MODEL) {
+    throw firstResult instanceof Error
+      ? firstResult
+      : new Error('OpenRouter belum mengembalikan data yang bisa dibaca.');
+  }
+
+  return parseReceiptImageWithOpenRouterModel({
+    base64,
+    mimeType,
+    model: OPENROUTER_FALLBACK_VISION_MODEL,
+  });
+}
+
+function isParsedTransaction(value: unknown): value is ParsedTransaction {
+  return typeof value === 'object' && value !== null && 'confidence' in value;
+}
+
+async function parseReceiptImageWithOpenRouterModel({
+  base64,
+  mimeType = 'image/jpeg',
+  model,
+}: {
+  base64: string;
+  mimeType?: string | null;
+  model: string;
+}) {
+  const response = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: getOpenRouterHeaders(),
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: buildReceiptPrompt(),
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: `data:${mimeType || 'image/jpeg'};base64,${base64}`,
+              },
+            },
+          ],
+        },
+      ],
+      include_reasoning: false,
+      max_tokens: 800,
+      temperature: 0.1,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await getOpenRouterErrorMessage(response));
+  }
+
+  return normalizeParsedTransaction(parseOpenRouterJson(await response.json()));
+}
+
+async function parseTransactionWithOpenRouter(input: string) {
+  const response = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: getOpenRouterHeaders(),
+    body: JSON.stringify({
+      model: OPENROUTER_TEXT_MODEL,
+      messages: [
+        {
+          role: 'user',
+          content: buildParsingPrompt(input),
+        },
+      ],
+      include_reasoning: false,
+      max_tokens: 500,
+      temperature: 0.1,
+      response_format: {
+        type: 'json_object',
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await getOpenRouterErrorMessage(response));
+  }
+
+  return normalizeParsedTransaction(parseOpenRouterJson(await response.json()));
+}
+
+function getOpenRouterHeaders() {
+  return {
+    Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+    'Content-Type': 'application/json',
+    'HTTP-Referer': 'http://localhost:8082',
+    'X-Title': 'Kebeng',
+  };
+}
+
+function parseOpenRouterJson(payload: unknown) {
+  const content = getOpenRouterContent(payload);
+
+  if (!content) {
+    throw new Error('OpenRouter belum mengembalikan data yang bisa dibaca.');
+  }
+
+  try {
+    return JSON.parse(content);
+  } catch {
+    const jsonText = content.match(/\{[\s\S]*\}/)?.[0];
+
+    if (!jsonText) {
+      throw new SyntaxError('JSON tidak ditemukan.');
+    }
+
+    return JSON.parse(jsonText);
+  }
+}
+
+function getOpenRouterContent(payload: unknown) {
+  const choice = (
+    payload as {
+      choices?: {
+        message?: {
+          content?: unknown;
+          reasoning?: unknown;
+          reasoning_details?: { text?: unknown }[];
+        };
+        text?: unknown;
+      }[];
+    }
+  )?.choices?.[0];
+  const content = choice?.message?.content;
+  const reasoning = choice?.message?.reasoning;
+  const text = choice?.text;
+  const reasoningDetails = choice?.message?.reasoning_details;
+
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === 'string') {
+          return part;
+        }
+
+        if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
+          return part.text;
+        }
+
+        return '';
+      })
+      .join('');
+  }
+
+  if (typeof text === 'string') {
+    return text;
+  }
+
+  if (typeof reasoning === 'string') {
+    return reasoning;
+  }
+
+  if (Array.isArray(reasoningDetails)) {
+    const detailsText = reasoningDetails
+      .map((part) => (typeof part.text === 'string' ? part.text : ''))
+      .join('');
+
+    if (detailsText) {
+      return detailsText;
+    }
+  }
+
+  return null;
+}
+
+async function getOpenRouterErrorMessage(response: Response) {
+  const fallbackMessage = 'Koneksi ke OpenRouter bermasalah. Coba lagi sebentar.';
+
+  try {
+    const payload = await response.json();
+    const message = typeof payload?.error?.message === 'string' ? payload.error.message : '';
+
+    if (response.status === 400) {
+      return 'Request OpenRouter belum valid. Cek model dan format input gambar.';
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      return 'API key OpenRouter belum valid atau belum punya izin.';
+    }
+
+    if (response.status === 404) {
+      return 'Model OpenRouter tidak ditemukan. Cek nama model di file .env.';
+    }
+
+    if (response.status === 429) {
+      return 'Kuota OpenRouter untuk model gratis sedang habis. Coba lagi nanti atau ganti model.';
+    }
+
+    return message || fallbackMessage;
+  } catch {
+    return fallbackMessage;
+  }
+}
+
+async function getGeminiErrorMessage(response: Response) {
+  const fallbackMessage = 'Koneksi ke Gemini bermasalah. Coba lagi sebentar.';
+
+  try {
+    const payload = await response.json();
+    const message = typeof payload?.error?.message === 'string' ? payload.error.message : '';
+
+    if (response.status === 400) {
+      return 'API key Gemini belum valid atau request tidak diterima. Cek kembali file .env.';
+    }
+
+    if (response.status === 403) {
+      return 'API key Gemini belum punya izin untuk model ini. Cek project Google AI Studio kamu.';
+    }
+
+    if (response.status === 429) {
+      return 'Kuota Gemini untuk API key ini habis atau belum aktif. Cek quota/billing di Google AI Studio.';
+    }
+
+    if (message) {
+      return message;
+    }
+
+    return fallbackMessage;
+  } catch {
+    return fallbackMessage;
   }
 }
 
@@ -97,6 +368,33 @@ Aturan:
 
 Pesan user:
 "${input}"
+`.trim();
+}
+
+function buildReceiptPrompt() {
+  const today = toISODate(new Date());
+
+  return `
+Kamu adalah OCR dan parser struk untuk aplikasi keuangan personal Bahasa Indonesia.
+Baca foto struk/nota, lalu kembalikan JSON valid saja, tanpa markdown.
+
+Format wajib:
+{
+  "type": "expense",
+  "amount": 25000,
+  "category": "Makanan",
+  "description": "Belanja di nama toko atau ringkasan struk",
+  "date": "YYYY-MM-DD",
+  "confidence": 0.95
+}
+
+Aturan:
+- Hari ini adalah ${today}.
+- Gunakan total akhir struk sebagai amount.
+- Jika tanggal tidak terlihat, gunakan hari ini dan turunkan confidence.
+- Jika foto tidak terbaca, isi amount/category/description/date dengan null dan confidence 0.2.
+- Jangan mengarang nominal.
+- Gunakan kategori ringkas Bahasa Indonesia: Makanan, Minuman, Transport, Belanja, Hiburan, Kesehatan, Pendidikan, Lainnya.
 `.trim();
 }
 

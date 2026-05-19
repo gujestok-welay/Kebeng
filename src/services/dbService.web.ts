@@ -12,6 +12,8 @@ export type SavedTransaction = {
   created_at: string;
 };
 
+export type TransactionSource = 'chat' | 'photo' | 'manual';
+
 const STORAGE_KEY = 'kebeng_transactions';
 
 export async function initDatabase() {
@@ -23,7 +25,7 @@ export async function initDatabase() {
   }
 }
 
-export async function saveParsedTransaction(transaction: ParsedTransaction) {
+export async function saveParsedTransaction(transaction: ParsedTransaction, source: TransactionSource = 'chat') {
   try {
     if (!transaction.type || !transaction.amount || !transaction.date) {
       throw new Error('Data transaksi belum lengkap.');
@@ -38,7 +40,7 @@ export async function saveParsedTransaction(transaction: ParsedTransaction) {
       category_id: null,
       category_name: transaction.category,
       description: transaction.description,
-      source: 'chat',
+      source,
       date: transaction.date,
       created_at: new Date().toISOString(),
     };
