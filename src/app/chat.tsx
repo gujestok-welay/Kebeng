@@ -5,8 +5,10 @@ import {
   IconPencil,
   IconRobot,
   IconSend,
+  IconSparkles,
   IconTrash,
 } from '@tabler/icons-react-native';
+import NetInfo, { useNetInfo } from '@react-native-community/netinfo';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -23,12 +25,22 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Badge, Card, HeaderIcon, ScreenShell, textStyles } from '@/components/kebeng-ui';
+import { Badge, Card, HeaderIcon, ProgressBar, ScreenShell, textStyles } from '@/components/kebeng-ui';
 import { Palette } from '@/constants/theme';
+import {
+  AI_USAGE_LIMITS,
+  AiUsage,
+  canUseAi,
+  formatBytes,
+  getAiUsage,
+  getImageSizeFromBase64,
+  recordAiUsage,
+} from '@/services/aiUsageService';
 import { initDatabase, saveParsedTransaction } from '@/services/dbService';
 import {
   parseTransactionFromReceiptImage,
   parseTransactionFromChat,
+  parseTransactionLocally,
   ParsedTransaction,
 } from '@/services/geminiService';
 import { formatRupiah } from '@/utils/format';
@@ -48,22 +60,31 @@ const initialMessages: ChatMessage[] = [
 ];
 
 export default function ChatScreen() {
+  const netInfo = useNetInfo();
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState('');
   const [draft, setDraft] = useState<ParsedTransaction | null>(null);
-  const [draftSource, setDraftSource] = useState<'chat' | 'photo'>('chat');
+  const [draftSource, setDraftSource] = useState<'chat' | 'photo' | 'manual'>('chat');
   const [isLoading, setIsLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('Kebeng AI sedang membaca transaksi...');
   const [isSaving, setIsSaving] = useState(false);
+  const [aiUsage, setAiUsage] = useState<AiUsage | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
-  const canSend = input.trim().length > 0 && !isLoading;
+  const inputLength = input.trim().length;
+  const isOnline = netInfo.isConnected !== false && netInfo.isInternetReachable !== false;
+  const canSend =
+    inputLength > 0 &&
+    inputLength <= AI_USAGE_LIMITS.chatMaxCharacters &&
+    !isLoading &&
+    (!aiUsage || canUseAi(aiUsage, 'chat'));
   const hasLowConfidence = useMemo(() => (draft?.confidence ?? 1) < 0.7, [draft]);
 
   useEffect(() => {
     initDatabase().catch((error) => {
       addSystemMessage(error instanceof Error ? error.message : 'Database belum siap.');
     });
+    refreshAiUsage();
   }, []);
 
   useEffect(() => {
@@ -77,6 +98,27 @@ export default function ChatScreen() {
       return;
     }
 
+    if (!isOnline) {
+      handleOfflineManualDraft(text);
+      return;
+    }
+
+    if (text.length > AI_USAGE_LIMITS.chatMaxCharacters) {
+      Alert.alert(
+        'Teks terlalu panjang',
+        `Maksimal ${AI_USAGE_LIMITS.chatMaxCharacters} karakter agar pemakaian AI tetap hemat.`,
+      );
+      return;
+    }
+
+    const currentUsage = aiUsage ?? await getAiUsage();
+
+    if (!canUseAi(currentUsage, 'chat')) {
+      Alert.alert('Batas Chat AI tercapai', 'Batas chat AI hari ini sudah habis. Coba lagi besok.');
+      setAiUsage(currentUsage);
+      return;
+    }
+
     setInput('');
     setDraft(null);
     setDraftSource('chat');
@@ -85,6 +127,7 @@ export default function ChatScreen() {
     setIsLoading(true);
 
     try {
+      setAiUsage(await recordAiUsage('chat'));
       const parsed = await parseTransactionFromChat(text);
       setDraft(parsed);
       setDraftSource('chat');
@@ -112,6 +155,22 @@ export default function ChatScreen() {
     }
 
     try {
+      const connection = await NetInfo.fetch();
+      const canReachInternet = connection.isConnected !== false && connection.isInternetReachable !== false;
+
+      if (!canReachInternet) {
+        addSystemMessage('Foto struk membutuhkan internet. Saat offline, gunakan input teks/manual dulu.');
+        return;
+      }
+
+      const currentUsage = aiUsage ?? await getAiUsage();
+
+      if (!canUseAi(currentUsage, 'receipt')) {
+        Alert.alert('Batas foto struk tercapai', 'Batas baca foto struk hari ini sudah habis. Coba lagi besok.');
+        setAiUsage(currentUsage);
+        return;
+      }
+
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permission.granted) {
@@ -137,6 +196,16 @@ export default function ChatScreen() {
         return;
       }
 
+      const imageBytes = asset.fileSize ?? getImageSizeFromBase64(asset.base64);
+
+      if (imageBytes > AI_USAGE_LIMITS.receiptMaxBytes) {
+        Alert.alert(
+          'Foto terlalu besar',
+          `Ukuran foto ${formatBytes(imageBytes)}. Gunakan foto di bawah ${formatBytes(AI_USAGE_LIMITS.receiptMaxBytes)} agar AI lebih cepat dan hemat.`,
+        );
+        return;
+      }
+
       setDraft(null);
       setDraftSource('photo');
       setMessages((current) => [
@@ -150,6 +219,7 @@ export default function ChatScreen() {
       setLoadingText('Kebeng AI sedang membaca foto struk...');
       setIsLoading(true);
 
+      setAiUsage(await recordAiUsage('receipt'));
       const parsed = await parseTransactionFromReceiptImage({
         base64: asset.base64,
         mimeType: asset.mimeType,
@@ -200,6 +270,27 @@ export default function ChatScreen() {
     setMessages((current) => [...current, { id: `${Date.now()}-system`, role: 'system', text }]);
   }
 
+  async function refreshAiUsage() {
+    setAiUsage(await getAiUsage());
+  }
+
+  function handleOfflineManualDraft(text: string) {
+    const parsed = parseTransactionLocally(text);
+
+    setInput('');
+    setDraft(parsed);
+    setDraftSource('manual');
+    setMessages((current) => [
+      ...current,
+      { id: `${Date.now()}-user-offline`, role: 'user', text },
+      {
+        id: `${Date.now()}-system-offline`,
+        role: 'system',
+        text: 'Offline aktif. Aku buat draft manual dari teksmu, cek lalu simpan.',
+      },
+    ]);
+  }
+
   return (
     <ScreenShell>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
@@ -210,6 +301,8 @@ export default function ChatScreen() {
           </View>
           <HeaderIcon icon={IconHistory} />
         </View>
+
+        <AiUsagePanel usage={aiUsage} inputLength={inputLength} isOnline={isOnline} />
 
         <ScrollView
           ref={scrollRef}
@@ -262,10 +355,17 @@ export default function ChatScreen() {
             editable={!isLoading}
             onChangeText={setInput}
             onSubmitEditing={handleSend}
-            placeholder="Tulis transaksi..."
+            placeholder={
+              inputLength > AI_USAGE_LIMITS.chatMaxCharacters
+                ? 'Teks terlalu panjang'
+                : 'Tulis transaksi...'
+            }
             placeholderTextColor={Palette.textTertiary}
             returnKeyType="send"
-            style={styles.input}
+            style={[
+              styles.input,
+              inputLength > AI_USAGE_LIMITS.chatMaxCharacters && styles.inputWarning,
+            ]}
             value={input}
           />
           <Pressable
@@ -284,6 +384,92 @@ export default function ChatScreen() {
         </SafeAreaView>
       </KeyboardAvoidingView>
     </ScreenShell>
+  );
+}
+
+function AiUsagePanel({
+  inputLength,
+  isOnline,
+  usage,
+}: {
+  inputLength: number;
+  isOnline: boolean;
+  usage: AiUsage | null;
+}) {
+  const chatCount = usage?.chatCount ?? 0;
+  const receiptCount = usage?.receiptCount ?? 0;
+  const chatPercent = Math.round((chatCount / AI_USAGE_LIMITS.chatDaily) * 100);
+  const receiptPercent = Math.round((receiptCount / AI_USAGE_LIMITS.receiptDaily) * 100);
+  const inputPercent = Math.round((inputLength / AI_USAGE_LIMITS.chatMaxCharacters) * 100);
+  const isInputWarning = inputLength > AI_USAGE_LIMITS.chatMaxCharacters * 0.85;
+
+  return (
+    <Card style={styles.usageCard}>
+      <View style={styles.usageHeader}>
+        <View style={styles.usageTitleRow}>
+          <IconSparkles size={15} color={Palette.accent} strokeWidth={1.9} />
+          <Text style={styles.usageTitle}>Mode AI Gratis</Text>
+        </View>
+        <Text style={styles.usageProvider}>OpenRouter</Text>
+      </View>
+
+      <View style={isOnline ? styles.connectionOnline : styles.connectionOffline}>
+        <Text style={isOnline ? styles.connectionOnlineText : styles.connectionOfflineText}>
+          {isOnline ? 'Online: AI aktif' : 'Offline: gunakan input manual'}
+        </Text>
+      </View>
+
+      <View style={styles.usageGrid}>
+        <UsageMeter
+          label="Chat"
+          value={chatCount}
+          limit={AI_USAGE_LIMITS.chatDaily}
+          percent={chatPercent}
+        />
+        <UsageMeter
+          label="Struk"
+          value={receiptCount}
+          limit={AI_USAGE_LIMITS.receiptDaily}
+          percent={receiptPercent}
+        />
+      </View>
+
+      <View style={styles.inputMeter}>
+        <View style={styles.inputMeterHeader}>
+          <Text style={styles.usageLabel}>Panjang chat</Text>
+          <Text style={isInputWarning ? styles.usageWarningValue : styles.usageValue}>
+            {inputLength}/{AI_USAGE_LIMITS.chatMaxCharacters}
+          </Text>
+        </View>
+        <ProgressBar value={inputPercent} warning={isInputWarning} />
+      </View>
+    </Card>
+  );
+}
+
+function UsageMeter({
+  label,
+  value,
+  limit,
+  percent,
+}: {
+  label: string;
+  limit: number;
+  percent: number;
+  value: number;
+}) {
+  const warning = percent >= 80;
+
+  return (
+    <View style={styles.usageMeter}>
+      <View style={styles.inputMeterHeader}>
+        <Text style={styles.usageLabel}>{label}</Text>
+        <Text style={warning ? styles.usageWarningValue : styles.usageValue}>
+          {value}/{limit}
+        </Text>
+      </View>
+      <ProgressBar value={percent} warning={warning} />
+    </View>
   );
 }
 
@@ -467,6 +653,84 @@ const styles = StyleSheet.create({
     color: Palette.textSecondary,
     fontSize: 13,
     marginTop: 6,
+  },
+  usageCard: {
+    gap: 12,
+    marginTop: 16,
+    paddingVertical: 12,
+  },
+  usageHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  usageTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
+  },
+  usageTitle: {
+    color: Palette.text,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  usageProvider: {
+    color: Palette.textTertiary,
+    fontSize: 11,
+  },
+  connectionOnline: {
+    alignSelf: 'flex-start',
+    backgroundColor: Palette.accentDark,
+    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  connectionOffline: {
+    alignSelf: 'flex-start',
+    backgroundColor: Palette.orangeBg,
+    borderRadius: 18,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  connectionOnlineText: {
+    color: Palette.accent,
+    fontSize: 11,
+  },
+  connectionOfflineText: {
+    color: Palette.orange,
+    fontSize: 11,
+  },
+  usageGrid: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  usageMeter: {
+    flex: 1,
+    gap: 7,
+  },
+  inputMeter: {
+    gap: 7,
+  },
+  inputMeterHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  usageLabel: {
+    color: Palette.textSecondary,
+    fontSize: 11,
+  },
+  usageValue: {
+    color: Palette.textSecondary,
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  usageWarningValue: {
+    color: Palette.orange,
+    fontSize: 11,
+    fontWeight: '500',
   },
   chatContent: {
     gap: 14,
@@ -672,6 +936,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     height: 42,
     paddingHorizontal: 16,
+  },
+  inputWarning: {
+    borderColor: Palette.orange,
   },
   sendButton: {
     alignItems: 'center',

@@ -6,11 +6,13 @@
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
+    "build:apk": "npx eas-cli build -p android --profile preview --environment preview",
     "ios": "expo start --ios",
     "web": "expo start --web --port 8082 --clear --max-workers 1",
     "lint": "expo lint"
   },
   "dependencies": {
+    "@react-native-community/netinfo": "11.5.2",
     "@react-navigation/bottom-tabs": "^7.15.5",
     "@react-navigation/elements": "^2.9.10",
     "@react-navigation/native": "^7.1.33",

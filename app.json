@@ -11,6 +11,11 @@
       "icon": "./assets/images/icon.png"
     },
     "android": {
+      "package": "com.kebeng.app",
+      "versionCode": 1,
+      "permissions": [
+        "INTERNET"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -35,7 +40,14 @@
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-image-picker",
+        {
+          "microphonePermission": false,
+          "photosPermission": "Izinkan Kebeng membaca foto struk dari galeri."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

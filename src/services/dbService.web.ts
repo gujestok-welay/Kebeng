@@ -61,6 +61,28 @@ export async function getRecentTransactions(limit = 10) {
   }
 }
 
+export async function getSettingValue(key: string) {
+  try {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    return window.localStorage.getItem(`kebeng_setting_${key}`);
+  } catch (error) {
+    throw toDatabaseError(error, 'Pengaturan belum bisa dibaca.');
+  }
+}
+
+export async function setSettingValue(key: string, value: string) {
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(`kebeng_setting_${key}`, value);
+    }
+  } catch (error) {
+    throw toDatabaseError(error, 'Pengaturan belum bisa disimpan.');
+  }
+}
+
 function readTransactions() {
   if (typeof window === 'undefined') {
     return [];

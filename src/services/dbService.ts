@@ -128,6 +128,38 @@ export async function getRecentTransactions(limit = 10) {
   }
 }
 
+export async function getSettingValue(key: string) {
+  try {
+    const db = await initDatabase();
+    const row = await db.getFirstAsync<{ value: string | null }>(
+      'SELECT value FROM settings WHERE key = ? LIMIT 1',
+      key,
+    );
+
+    return row?.value ?? null;
+  } catch (error) {
+    throw toDatabaseError(error, 'Pengaturan belum bisa dibaca.');
+  }
+}
+
+export async function setSettingValue(key: string, value: string) {
+  try {
+    const db = await initDatabase();
+
+    await db.runAsync(
+      `
+      INSERT INTO settings (key, value)
+      VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `,
+      key,
+      value,
+    );
+  } catch (error) {
+    throw toDatabaseError(error, 'Pengaturan belum bisa disimpan.');
+  }
+}
+
 async function getDatabase() {
   databasePromise ??= SQLite.openDatabaseAsync('kebeng.db');
   return databasePromise;

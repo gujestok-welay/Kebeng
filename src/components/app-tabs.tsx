@@ -16,7 +16,7 @@ import { Palette } from '@/constants/theme';
 const tabs = [
   { name: 'home', href: '/', label: 'Home', icon: IconHome, fab: false },
   { name: 'chat', href: '/chat', label: 'Chat AI', icon: IconMessageCircle, fab: false },
-  { name: 'add', href: '/chat', label: '', icon: IconPlus, fab: true },
+  { name: 'add', href: '/manual', label: '', icon: IconPlus, fab: true },
   { name: 'transactions', href: '/transactions', label: 'Transaksi', icon: IconList, fab: false },
   { name: 'reports', href: '/reports', label: 'Laporan', icon: IconChartBar, fab: false },
   { name: 'settings', href: '/settings', label: 'Pengaturan', icon: IconSettings, fab: false },

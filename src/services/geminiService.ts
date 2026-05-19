@@ -417,7 +417,7 @@ function normalizeParsedTransaction(value: Partial<ParsedTransaction>): ParsedTr
   };
 }
 
-function parseTransactionLocally(input: string): ParsedTransaction {
+export function parseTransactionLocally(input: string): ParsedTransaction {
   const normalized = input.toLowerCase();
   const amount = parseAmount(normalized);
   const type: TransactionType = /(gaji|terima|dapat|masuk|pemasukan|bonus|bayaran)/i.test(normalized)
